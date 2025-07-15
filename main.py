@@ -45,13 +45,13 @@ class MeshtasticZigbeeBridge:
         self.mqtt_password = os.getenv('MQTT_PASSWORD')
         self.mqtt_topics = os.getenv('MQTT_TOPICS', 'zigbee2mqtt/motion_outdoor,zigbee2mqtt/door_outdoor').split(',')
         self.meshtastic_port = os.getenv('MESHTASTIC_PORT', '/dev/ttyUSB0')
-        self.target_node = os.getenv('TARGET_NODE', '!11950204')
+        self.channel_index = int(os.getenv('CHANNEL_INDEX', '5'))
         
         self.logger.info(f"Configuration loaded:")
         self.logger.info(f"  MQTT Broker: {self.mqtt_broker}:{self.mqtt_port}")
         self.logger.info(f"  MQTT Topics: {', '.join(self.mqtt_topics)}")
         self.logger.info(f"  Meshtastic Port: {self.meshtastic_port}")
-        self.logger.info(f"  Target Node: {self.target_node}")
+        self.logger.info(f"  Channel Index: {self.channel_index}")
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""
@@ -86,13 +86,13 @@ class MeshtasticZigbeeBridge:
             
             # Check for motion detection event
             if 'occupancy' in data and data.get('occupancy') is True:
-                self.logger.info("Motion detected! Sending message to Meshtastic node...")
+                self.logger.info("Motion detected! Sending message to Meshtastic channel...")
                 self.send_meshtastic_message("Motion detected")
             
             # Check for door sensor events
             elif ('tamper' in data and data.get('tamper') is True) or \
                  ('contact' in data and data.get('contact') is False):
-                self.logger.info("Door triggered! Sending message to Meshtastic node...")
+                self.logger.info("Door triggered! Sending message to Meshtastic channel...")
                 self.send_meshtastic_message("Door triggered!")
             
         except json.JSONDecodeError as e:
@@ -138,12 +138,12 @@ class MeshtasticZigbeeBridge:
             return False
 
     def send_meshtastic_message(self, message: str):
-        """Send a text message to the target Meshtastic node using CLI."""
+        """Send a text message to the target Meshtastic channel using CLI."""
         try:
-            self.logger.info(f"Sending message '{message}' to node {self.target_node}")
+            self.logger.info(f"Sending message '{message}' to channel index {self.channel_index}")
             
             # Build the CLI command
-            cmd = ['meshtastic', '--port', self.meshtastic_port, '--dest', self.target_node, '--send', message]
+            cmd = ['meshtastic', '--port', self.meshtastic_port, '--ch-index', str(self.channel_index), '--send', message]
             
             # Execute the command
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
