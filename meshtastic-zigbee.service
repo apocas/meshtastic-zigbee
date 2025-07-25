@@ -1,0 +1,38 @@
+[Unit]
+Description=Meshtastic Zigbee Bridge
+Documentation=https://github.com/apocas/meshtastic-zigbee
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pedrodias
+Group=pedrodias
+WorkingDirectory=/home/pedrodias/meshtastic-zigbee
+Environment=PATH=/home/pedrodias/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/pedrodias/.local/bin/uv run python main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshtastic-zigbee
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/home/pedrodias/meshtastic-zigbee
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=50%
+
+# Environment file (optional)
+EnvironmentFile=-/home/pedrodias/meshtastic-zigbee/.env
+
+[Install]
+WantedBy=multi-user.target

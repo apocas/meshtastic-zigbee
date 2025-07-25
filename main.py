@@ -22,6 +22,7 @@ class MeshtasticZigbeeBridge:
         self.load_config()
         self.mqtt_client: Optional[mqtt.Client] = None
         self.running = True
+        self.last_message_time = 0  # Track last message time for rate limiting
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -45,7 +46,7 @@ class MeshtasticZigbeeBridge:
         self.mqtt_password = os.getenv('MQTT_PASSWORD')
         self.mqtt_topics = os.getenv('MQTT_TOPICS', 'zigbee2mqtt/motion_outdoor,zigbee2mqtt/door_outdoor').split(',')
         self.meshtastic_port = os.getenv('MESHTASTIC_PORT', '/dev/ttyUSB0')
-        self.channel_index = int(os.getenv('CHANNEL_INDEX', '5'))
+        self.channel_index = int(os.getenv('CHANNEL_INDEX', '1'))
         
         self.logger.info(f"Configuration loaded:")
         self.logger.info(f"  MQTT Broker: {self.mqtt_broker}:{self.mqtt_port}")
@@ -139,30 +140,59 @@ class MeshtasticZigbeeBridge:
 
     def send_meshtastic_message(self, message: str):
         """Send a text message to the target Meshtastic channel using CLI."""
-        try:
-            self.logger.info(f"Sending message '{message}' to channel index {self.channel_index}")
+        # Rate limiting: enforce minimum 60 seconds between messages
+        current_time = time.time()
+        time_since_last = current_time - self.last_message_time
+        min_interval = 60  # seconds
+        
+        if time_since_last < min_interval:
+            remaining_time = min_interval - time_since_last
+            self.logger.info(f"Rate limiting: skipping message '{message}'. Next message allowed in {remaining_time:.1f} seconds")
+            return
+        
+        max_retries = 10
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt == 0:
+                    self.logger.info(f"Sending message '{message}' to channel index {self.channel_index}")
+                else:
+                    self.logger.info(f"Retry {attempt}/{max_retries - 1}: Sending message '{message}' to channel index {self.channel_index}")
+                
+                # Build the CLI command
+                cmd = ['meshtastic', '--port', self.meshtastic_port, '--ch-index', str(self.channel_index), '--send', message]
+                
+                # Execute the command
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    self.logger.info("Message sent successfully")
+                    if result.stdout:
+                        self.logger.debug(f"Meshtastic output: {result.stdout.strip()}")
+                    
+                    # Update last message time only on successful send
+                    self.last_message_time = current_time
+                    return  # Success, exit the retry loop
+                else:
+                    self.logger.warning(f"Failed to send message. Return code: {result.returncode}")
+                    if result.stderr:
+                        self.logger.warning(f"Error output: {result.stderr.strip()}")
+                    if result.stdout:
+                        self.logger.warning(f"Standard output: {result.stdout.strip()}")
+                
+            except subprocess.TimeoutExpired:
+                self.logger.warning("Meshtastic command timed out")
+            except Exception as e:
+                self.logger.warning(f"Failed to send Meshtastic message: {e}")
             
-            # Build the CLI command
-            cmd = ['meshtastic', '--port', self.meshtastic_port, '--ch-index', str(self.channel_index), '--send', message]
-            
-            # Execute the command
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
-            if result.returncode == 0:
-                self.logger.info("Message sent successfully")
-                if result.stdout:
-                    self.logger.debug(f"Meshtastic output: {result.stdout.strip()}")
-            else:
-                self.logger.error(f"Failed to send message. Return code: {result.returncode}")
-                if result.stderr:
-                    self.logger.error(f"Error output: {result.stderr.strip()}")
-                if result.stdout:
-                    self.logger.error(f"Standard output: {result.stdout.strip()}")
-            
-        except subprocess.TimeoutExpired:
-            self.logger.error("Meshtastic command timed out")
-        except Exception as e:
-            self.logger.error(f"Failed to send Meshtastic message: {e}")
+            # If this wasn't the last attempt, wait before retrying
+            if attempt < max_retries - 1:
+                self.logger.info(f"Waiting {retry_delay} seconds before retry...")
+                time.sleep(retry_delay)
+        
+        # If we get here, all retries failed
+        self.logger.error(f"Failed to send message after {max_retries} attempts")
 
     def connect_mqtt(self):
         """Connect to MQTT broker."""
